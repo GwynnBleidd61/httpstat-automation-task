@@ -1,0 +1,79 @@
+---
+- name: Ensure Docker build context directory exists on target host
+  ansible.builtin.file:
+    path: "{{ docker_build_context_dest }}"
+    state: directory
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: "0755"
+
+- name: Copy Docker build context to target host
+  ansible.builtin.copy:
+    src: build_context/
+    dest: "{{ docker_build_context_dest }}/"
+    owner: "{{ docker_user }}"
+    group: "{{ docker_user }}"
+    mode: preserve
+  register: docker_context_copy
+
+- name: Check if Docker image already exists
+  ansible.builtin.command:
+    cmd: "docker image inspect {{ docker_image_name }}:{{ docker_image_tag }}"
+  register: docker_image_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Build Docker image when context changed or image is missing
+  ansible.builtin.command:
+    cmd: "docker build --pull -t {{ docker_image_name }}:{{ docker_image_tag }} ."
+    chdir: "{{ docker_build_context_dest }}"
+  register: docker_build
+  changed_when: true
+  when: docker_context_copy.changed or docker_image_inspect.rc != 0
+
+- name: Remove previous container if it exists
+  ansible.builtin.command:
+    cmd: "docker rm -f {{ docker_container_name }}"
+  register: remove_container
+  failed_when: remove_container.rc not in [0, 1]
+  changed_when: remove_container.rc == 0
+
+- name: Run container with HTTP status checker
+  ansible.builtin.command:
+    cmd: "docker run --name {{ docker_container_name }} {{ docker_image_name }}:{{ docker_image_tag }}"
+  register: docker_run
+  changed_when: true
+  failed_when: false
+
+- name: Read container logs with docker logs
+  ansible.builtin.command:
+    cmd: "docker logs {{ docker_container_name }}"
+  register: container_logs
+  changed_when: false
+  failed_when: false
+
+- name: Combine container stdout and stderr logs
+  ansible.builtin.set_fact:
+    container_combined_logs: "{{ container_logs.stdout ~ '\n' ~ container_logs.stderr }}"
+
+- name: Get container exit code
+  ansible.builtin.command:
+    cmd: >-
+      docker inspect {{ docker_container_name }}
+      --format='{{ "{{" }}.State.ExitCode{{ "}}" }}'
+  register: container_exit_code
+  changed_when: false
+  failed_when: false
+
+- name: Show container logs
+  ansible.builtin.debug:
+    msg: "{{ container_combined_logs.splitlines() }}"
+
+- name: Validate container execution result
+  ansible.builtin.assert:
+    that:
+      - docker_run.rc == 0
+      - container_exit_code.stdout | int == 0
+      - httpstat_success_marker in container_combined_logs
+    fail_msg: "Container execution failed or expected log marker was not found."
+    success_msg: "Container finished successfully and docker logs contain expected output."

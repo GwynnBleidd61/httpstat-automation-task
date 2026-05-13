@@ -1,0 +1,22 @@
+---
+- name: Install Docker on target host
+  hosts: docker_hosts
+  become: true
+  gather_facts: true
+
+  roles:
+    - docker
+
+
+- name: Build and run HTTP status checker container
+  hosts: docker_hosts
+  become: false
+  gather_facts: false
+
+  tasks:
+    - name: Reset SSH connection to apply docker group membership
+      ansible.builtin.meta: reset_connection
+
+    - name: Run HTTP status checker container role
+      ansible.builtin.import_role:
+        name: httpstat_container

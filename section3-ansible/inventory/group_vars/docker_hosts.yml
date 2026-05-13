@@ -1,0 +1,10 @@
+---
+docker_user: "{{ ansible_user }}"
+
+docker_image_name: httpstat-checker
+docker_image_tag: ansible
+docker_container_name: httpstat-checker
+
+docker_build_context_dest: "/home/{{ docker_user }}/httpstat-checker-docker-context"
+
+httpstat_success_marker: "All requests were processed"
